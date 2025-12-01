@@ -1,5 +1,5 @@
 // ====== 基本設定 ======
-const API_KEY = "CWA-7D5694B3-17E1-4698-AC66-050F8DABC152"; // ← 換成你的中央氣象署 API 金鑰
+const API_KEY = "CWA-7D5694B3-17E1-4698-AC66-050F8DABC152"; // <- 這裡放你的 key
 const API_URL = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-A0021-001?Authorization=${API_KEY}`;
 
 const infoDiv = document.getElementById('info');
@@ -9,7 +9,7 @@ const ctx = document.getElementById('tideChart').getContext('2d');
 
 let tideChart = null;
 let xLabels = [];     // X 軸：一天中的第幾分鐘 (0~1440)
-let tideHeights = []; // Y 軸：潮高
+let tideHeights = []; // Y 軸：潮高 (m)
 let lastUpdateTime = null;
 
 // Chart.js 插件：畫現在時間的垂直線
@@ -37,28 +37,64 @@ const nowLinePlugin = {
 
 Chart.register(nowLinePlugin);
 
-// ====== 抓潮汐資料 ======
+// ====== 抓潮汐資料（對應 CWA F-A0021-001 結構） ======
 async function fetchTideData() {
   statusDiv.textContent = "正在更新潮汐資料...";
   try {
     const res = await fetch(API_URL);
+    if (!res.ok) {
+      throw new Error("HTTP " + res.status);
+    }
     const data = await res.json();
 
-    // 這邊先示範：取第一個測站 / 第一天
-    const locations = data.records.location;
-    const loc = locations[0];       // 你可以改成自己指定測站
-    const day = loc.time[0];        // 或是根據今天日期去 match
+    // 安全檢查
+    if (!data.records || !data.records.tideForecasts || !data.records.tideForecasts.length) {
+      throw new Error("資料格式異常：沒有 tideForecasts");
+    }
+
+    // 目前簡化：取第一個地點、第一天
+    const loc = data.records.tideForecasts[0];
+    const locationName = loc.LocationName;
+    const timePeriods = loc.TimePeriods || [];
+
+    if (!timePeriods.length) {
+      throw new Error("資料格式異常：沒有 TimePeriods");
+    }
+
+    const day = timePeriods[0]; // 你之後可以改成依照今天日期去挑
+    const dateStr = day.Daily;  // e.g. "2025-12-07"
+    const tideRange = day.TideRange; // 大 / 中 / 小
+    const times = day.Time || [];
+
+    if (!times.length) {
+      throw new Error("資料格式異常：沒有 Time 陣列");
+    }
 
     xLabels = [];
     tideHeights = [];
 
-    day.tideData.forEach(td => {
-      // 假設格式為 "HH:MM"
-      const [hh, mm] = td.tideTime.split(':').map(Number);
+    // 把一天內所有滿/乾潮時間轉成 (分鐘, 潮高)
+    times.forEach(t => {
+      // DateTime 例如 "2025-12-07T03:58:00+08:00"
+      const dt = new Date(t.DateTime);
+      const hh = dt.getHours();
+      const mm = dt.getMinutes();
       const minutes = hh * 60 + mm;
-      xLabels.push(minutes);
-      tideHeights.push(parseFloat(td.tideHeight));
+
+      // 潮高：用 AboveLocalMSL，單位是公分 => 轉公尺
+      const heights = t.TideHeights || {};
+      const aboveLocal = parseFloat(heights.AboveLocalMSL);
+      const heightM = isNaN(aboveLocal) ? null : aboveLocal / 100.0;
+
+      if (heightM != null) {
+        xLabels.push(minutes);
+        tideHeights.push(heightM);
+      }
     });
+
+    if (!xLabels.length) {
+      throw new Error("Time 裡沒有可用的潮高資料");
+    }
 
     // 依時間排序
     const combined = xLabels.map((m, i) => ({ m, h: tideHeights[i] }))
@@ -66,16 +102,14 @@ async function fetchTideData() {
     xLabels = combined.map(o => o.m);
     tideHeights = combined.map(o => o.h);
 
-    infoDiv.textContent = `測站：${loc.locationName}　日期：${day.dataTime}`;
+    infoDiv.textContent = `測站：${locationName}　日期：${dateStr}　潮別：${tideRange}`;
     lastUpdateTime = new Date();
     statusDiv.textContent = `資料更新時間：${formatDateTime(lastUpdateTime)}`;
 
-    // 畫圖
     drawChart();
-    // 初次更新現在時間線
     updateNowLine(true);
 
-    // 存成 localStorage（離線備援）
+    // 存快取
     localStorage.setItem('tideData', JSON.stringify({
       xLabels,
       tideHeights,
@@ -84,10 +118,9 @@ async function fetchTideData() {
     }));
 
   } catch (e) {
-    console.error(e);
+    console.error("fetchTideData error:", e);
     statusDiv.textContent = "潮汐資料更新失敗，改用上次快取（若有）。";
 
-    // 若有快取就讀快取
     const cache = localStorage.getItem('tideData');
     if (cache) {
       const obj = JSON.parse(cache);
@@ -96,8 +129,10 @@ async function fetchTideData() {
       infoDiv.textContent = obj.infoText || "離線模式（使用上次資料）";
       lastUpdateTime = obj.lastUpdateTime ? new Date(obj.lastUpdateTime) : null;
 
-      drawChart();
-      updateNowLine(true);
+      if (xLabels.length) {
+        drawChart();
+        updateNowLine(true);
+      }
 
       if (lastUpdateTime) {
         statusDiv.textContent += `　上次更新：${formatDateTime(lastUpdateTime)}`;
@@ -122,7 +157,7 @@ function drawChart() {
   tideChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: xLabels,  // 這是 linear scale 的 value
+      labels: xLabels,
       datasets: [{
         label: '潮高 (m)',
         data: tideHeights,
@@ -137,25 +172,19 @@ function drawChart() {
       scales: {
         x: {
           type: 'linear',
-          title: {
-            display: true,
-            text: '時間'
-          },
+          title: { display: true, text: '時間' },
           ticks: {
             callback: value => {
               const h = Math.floor(value / 60);
               const m = value % 60;
-              return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+              return `${pad2(h)}:${pad2(m)}`;
             }
           },
           min: 0,
           max: 24 * 60
         },
         y: {
-          title: {
-            display: true,
-            text: '潮高 (m)'
-          }
+          title: { display: true, text: '潮高 (m)' }
         }
       },
       plugins: {
@@ -181,16 +210,16 @@ function updateNowLine(showTimeText = false) {
   tideChart.update('none');
 
   if (showTimeText) {
-    statusDiv.textContent = (lastUpdateTime
-      ? `資料更新時間：${formatDateTime(lastUpdateTime)}`
-      : "") + `　|　現在時間：${pad2(h)}:${pad2(m)}`;
+    statusDiv.textContent =
+      (lastUpdateTime ? `資料更新時間：${formatDateTime(lastUpdateTime)}` : "") +
+      `　|　現在時間：${pad2(h)}:${pad2(m)}`;
   }
 }
 
 // 每分鐘更新一次現在時間線
 setInterval(() => updateNowLine(true), 60 * 1000);
 
-// 工具函數
+// 小工具
 function pad2(n) {
   return String(n).padStart(2, '0');
 }
