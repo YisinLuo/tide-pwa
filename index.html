@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>潮汐監控</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f4c81" />
+
+  <!-- iOS PWA 額外設定 -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="潮汐監控" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f7f7f7;
+    }
+    h1 {
+      margin: 0 0 4px 0;
+      font-size: 22px;
+    }
+    #info {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #555;
+    }
+    #status {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    #chartContainer {
+      position: relative;
+      height: 60vh;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      padding: 8px;
+    }
+    #refreshBtn {
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background: #0f4c81;
+      color: #fff;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>潮汐監控</h1>
+  <div id="info">載入中...</div>
+  <div id="status"></div>
+
+  <div id="chartContainer">
+    <canvas id="tideChart"></canvas>
+  </div>
+
+  <button id="refreshBtn">重新整理資料</button>
+
+  <script src="app.js"></script>
+
+  <script>
+    // 註冊 service worker（PWA）
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js')
+        .then(() => console.log('Service worker registered'))
+        .catch(console.error);
+    }
+  </script>
+</body>
+</html>
