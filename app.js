@@ -1,5 +1,5 @@
 // ====== 基本設定 ======
-const API_KEY = "YOUR_CWA_API_KEY_HERE"; // ← 換成你的中央氣象署 API 金鑰
+const API_KEY = "CWA-7D5694B3-17E1-4698-AC66-050F8DABC152"; // ← 換成你的中央氣象署 API 金鑰
 const API_URL = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-A0021-001?Authorization=${API_KEY}`;
 
 const infoDiv = document.getElementById('info');
