@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>潮汐監控</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f4c81" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="潮汐監控" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      margin: 0;
+      padding: 12px;
+      background: #f7f7f7;
+      font-size: 35px;
+    }
+
+    h1 {
+      margin: 0 0 12px 0;
+      font-size: 40px;
+      font-weight: 700;
+    }
+
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 35px;
+    }
+
+    #stationSelect {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 35px;
+    }
+
+    #refreshBtn {
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: none;
+      background: #0f4c81;
+      color: #fff;
+      font-size: 20px;
+    }
+
+    #info {
+      font-size: 40px;
+      margin-bottom: 4px;
+      color: #333;
+    }
+
+    #status {
+      font-size: 35px;
+      margin-bottom: 8px;
+      color: #555;
+    }
+
+    /* 可左右滑動的外層 */
+    #chartOuter {
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    /* 內層寬度會由 JS 依天數動態設定，這裡只給個最小值 */
+    #chartContainer {
+      position: relative;
+      height: 340px;
+      min-width: 1200px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      padding: 8px;
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>天氣＆潮汐</h1>
+
+  <div id="controls">
+    <label>
+      測站：
+      <select id="stationSelect"></select>
+    </label>
+    <button id="refreshBtn">重新整理資料</button>
+  </div>
+
+  <div id="info">目前尚未載入資料。</div>
+  <div id="status"></div>
+
+  <div id="chartOuter">
+    <div id="chartContainer">
+      <canvas id="tideChart"></canvas>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js')
+        .then(() => console.log('Service worker registered'))
+        .catch(console.error);
+    }
+  </script>
+</body>
+</html>
