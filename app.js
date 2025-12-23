@@ -36,7 +36,7 @@ const statusDiv = document.getElementById('status');
 const stationSelect = document.getElementById('stationSelect');
 const refreshBtn = document.getElementById('refreshBtn');
 const ctx = document.getElementById('tideChart').getContext('2d');
-const chartContainer = document.getElementById('chartContainer'); // 用來調整寬度
+const chartContainer = document.getElementById('chartContainer');
 
 let tideChart = null;
 let locationsData = [];
@@ -64,6 +64,11 @@ function formatDateOnly(d) {
   return `${yyyy}-${MM}-${dd}`;
 }
 
+function weekZh(d) {
+  const w = ["日","一","二","三","四","五","六"];
+  return w[d.getDay()];
+}
+
 function isHighTide(e) {
   if (!e.tide) return false;
   return e.tide.includes("滿潮") || e.tide.includes("高潮");
@@ -72,6 +77,15 @@ function isHighTide(e) {
 function isLowTide(e) {
   if (!e.tide) return false;
   return e.tide.includes("乾潮") || e.tide.includes("低潮");
+}
+
+function tideRangeToText(v) {
+  // 你的資料 TideRange: "大" | "中" | "小"（也可能看到 "長" 或其他）
+  if (!v) return "";
+  if (v === "大") return "大潮";
+  if (v === "中") return "中潮";
+  if (v === "小") return "小潮";
+  return `${v}潮`; // 保底
 }
 
 // ====== 現在時間橘線插件 ======
@@ -85,7 +99,7 @@ const nowLinePlugin = {
     const xScale = chart.scales.x;
     const x = xScale.getPixelForValue(xVal);
 
-    // 如果現在時間不在顯示範圍內，就不畫
+    // 不在範圍內就不畫
     if (x < chart.chartArea.left || x > chart.chartArea.right) return;
 
     ctx.save();
@@ -120,11 +134,14 @@ const tideLabelPlugin = {
     labels.forEach(l => {
       const x = xScale.getPixelForValue(l.x);
       const y = yScale.getPixelForValue(l.y);
+
+      // 超出可視區就不畫，避免卡頓
+      if (x < chart.chartArea.left - 50 || x > chart.chartArea.right + 50) return;
+
       const lines = l.text.split('\n');
       const lineHeight = 14;
       let baseY = y - 6;
 
-      // 往上疊文字
       for (let i = lines.length - 1; i >= 0; i--) {
         ctx.fillText(lines[i], x, baseY);
         baseY -= lineHeight;
@@ -137,40 +154,39 @@ const tideLabelPlugin = {
 
 Chart.register(nowLinePlugin, tideLabelPlugin);
 
-// ====== 解析一個測站的所有潮汐事件（整個月） ======
-function collectTideEvents(root) {
+// ====== 解析：直接走 Daily[]，把 TideRange 帶到每個 Time[] ======
+function collectTideEventsFromDaily(forecastObj) {
   const result = [];
 
-  function visit(node) {
-    if (!node || typeof node !== 'object') return;
+  const daily = forecastObj?.Location?.TimePeriods?.Daily || [];
+  daily.forEach(day => {
+    const tideRange = day.TideRange || ""; // "大" | "中" | "小"
+    const dateStr = day.Date || "";        // "YYYY-MM-DD"
+    const timeArr = day.Time || [];
 
-    if (node.DateTime && node.TideHeights) {
+    timeArr.forEach(t => {
+      const dt = t.DateTime;
+      const tide = t.Tide || "";
+
       const h =
-        node.TideHeights.AboveLocalMSL ??
-        node.TideHeights.AboveTWD ??
-        node.TideHeights.AboveTWVD ??
-        node.TideHeights.AboveTWDV;
+        t?.TideHeights?.AboveLocalMSL ??
+        t?.TideHeights?.AboveTWD ??
+        t?.TideHeights?.AboveTWVD ??
+        t?.TideHeights?.AboveTWDV ??
+        t?.TideHeights?.AboveChartDatum;
 
-      if (h !== undefined) {
+      if (dt && h !== undefined && h !== null && h !== "") {
         result.push({
-          dateTime: node.DateTime,
-          tide: node.Tide || "",
-          height: Number(h)
+          dateTime: dt,                 // ISO with +08:00
+          tide,
+          height: Number(h),            // cm (AboveLocalMSL 是 Integer, 單位 cm)
+          tideRange,                    // "大"/"中"/"小"
+          date: dateStr                 // "YYYY-MM-DD"
         });
       }
-    }
+    });
+  });
 
-    for (const key in node) {
-      const val = node[key];
-      if (Array.isArray(val)) {
-        val.forEach(visit);
-      } else if (typeof val === 'object') {
-        visit(val);
-      }
-    }
-  }
-
-  visit(root);
   result.sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
   return result;
 }
@@ -182,7 +198,7 @@ async function fetchTideData() {
     const res = await fetch(API_URL);
     const data = await res.json();
 
-    const forecasts = (data.records && data.records.TideForecasts) || [];
+    const forecasts = data?.records?.TideForecasts || [];
     if (!forecasts.length) throw new Error("TideForecasts 為空");
 
     locationsData = forecasts.map(f => {
@@ -191,11 +207,11 @@ async function fetchTideData() {
       return {
         id: loc.LocationId || loc.LocationName,
         name,
-        events: collectTideEvents(f)
+        events: collectTideEventsFromDaily(f)
       };
     })
-      .filter(l => l.events.length > 0)
-      .filter(l => ALLOWED_STATION_KEYWORDS.some(k => l.name.includes(k)));
+    .filter(l => l.events.length > 0)
+    .filter(l => ALLOWED_STATION_KEYWORDS.some(k => l.name.includes(k)));
 
     if (!locationsData.length) {
       throw new Error("沒有解析到任何指定測站的潮汐事件");
@@ -241,7 +257,7 @@ function updateStationSelect() {
   }
 }
 
-// ====== 畫出整個月的波形，並依天數調整寬度 ======
+// ====== 畫圖：整個月，但畫面只看到約一天，靠水平滑動 ======
 function drawCurrentLocation() {
   if (!locationsData.length) return;
 
@@ -255,29 +271,27 @@ function drawCurrentLocation() {
     return;
   }
 
-  // 取得整個資料範圍（大多為一個月）
   const firstDate = new Date(events[0].dateTime);
   const lastDate = new Date(events[events.length - 1].dateTime);
 
   infoDiv.textContent = `測站：${loc.name}　（顯示 ${formatDateOnly(firstDate)} ～ ${formatDateOnly(lastDate)} 的預報）`;
 
-  // 依天數動態調整 chartContainer 的寬度，讓畫面大約只看到一天
+  // 依天數調整寬度：大約一天一個視窗寬度
   const dayMs = 24 * 60 * 60 * 1000;
   const days = Math.max(1, Math.round((lastDate - firstDate) / dayMs) + 1);
-  const widthPerDay = 600; // 一天的寬度（px）
+  const widthPerDay = 600; // ⭐ 你要一天顯示多少寬，就改這裡
   chartContainer.style.minWidth = (days * widthPerDay) + 'px';
 
   const dataPoints = [];
   const tideLabels = [];
   const timeStamps = [];
-  const pointRadius = [];           // ⭐ 新增：每個點的半徑
-  const pointBackgroundColor = [];  // ⭐ 新增：每個點的顏色
+  const pointRadius = [];
+  const pointBackgroundColor = [];
 
   events.forEach(e => {
     const dt = new Date(e.dateTime);
     const t = dt.getTime();
     const heightM = e.height / 100.0;
-    const timeStr = `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
 
     timeStamps.push(t);
     dataPoints.push({ x: t, y: heightM });
@@ -286,51 +300,57 @@ function drawCurrentLocation() {
     const low = isLowTide(e);
 
     if (high || low) {
-      // ⭐ 滿潮 / 乾潮顯示小圓點
       pointRadius.push(4);
       pointBackgroundColor.push(high ? BLUE_COLOR : GREEN_COLOR);
 
-      const line1 = `${heightM.toFixed(2)}m`;
-      const line2 = `${timeStr} ${e.tide}`;
+      // 註記文字：第一行 大/中/小潮；第二行高度；第三行 日期(星期) 時間 滿/乾潮
+      const tideRangeText = tideRangeToText(e.tideRange);
+      const dateStr = `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())}`;
+      const timeStr = `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+      const w = weekZh(dt);
+
+      const line1 = tideRangeText ? tideRangeText : ""; // 大潮/中潮/小潮
+      const line2 = `${heightM.toFixed(2)}m`;
+      const line3 = `${dateStr}(${w}) ${timeStr} ${e.tide}`;
+
+      const text = tideRangeText ? `${line1}\n${line2}\n${line3}` : `${line2}\n${line3}`;
+
       tideLabels.push({
         x: t,
         y: heightM,
-        text: `${line1}\n${line2}`
+        text
       });
     } else {
-      // 其他時間點不顯示點
       pointRadius.push(0);
       pointBackgroundColor.push('rgba(0,0,0,0)');
     }
   });
 
-  // X 軸範圍（左右多留半天）
+  // X 軸範圍（左右留 12 小時）
   const minT = Math.min(...timeStamps);
   const maxT = Math.max(...timeStamps);
   const marginMs = 12 * 60 * 60 * 1000;
   const xMin = minT - marginMs;
   const xMax = maxT + marginMs;
 
-  if (tideChart) {
-    tideChart.destroy();
-  }
+  if (tideChart) tideChart.destroy();
 
   tideChart = new Chart(ctx, {
     type: 'line',
     data: {
       datasets: [{
         label: '潮高 (m)',
-        data: dataPoints,             // {x, y}
+        data: dataPoints,
         tension: 0.4,
-        fill: false,                  // 不填滿，只畫線
+        fill: false,
         borderWidth: 2,
-        pointRadius: pointRadius,              // ⭐ 使用我們算好的半徑陣列
-        pointBackgroundColor: pointBackgroundColor, // ⭐ 對應顏色
+        pointRadius: pointRadius,
+        pointBackgroundColor: pointBackgroundColor,
         pointHitRadius: 6,
         segment: {
-          borderColor: ctx => {
-            const p0 = ctx.p0.parsed;
-            const p1 = ctx.p1.parsed;
+          borderColor: seg => {
+            const p0 = seg.p0.parsed;
+            const p1 = seg.p1.parsed;
             if (!p0 || !p1) return BLUE_COLOR;
             return (p1.y >= p0.y) ? BLUE_COLOR : GREEN_COLOR;
           }
@@ -340,15 +360,13 @@ function drawCurrentLocation() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      parsing: false, // 告訴 Chart.js 我們已經用 {x,y}
+      parsing: false,
       scales: {
         x: {
           type: 'linear',
-          title: {
-            display: true,
-            text: '日期 / 時間'
-          },
+          title: { display: true, text: '日期 / 時間' },
           ticks: {
+            maxTicksLimit: 10,
             callback: value => {
               const d = new Date(value);
               return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
@@ -356,43 +374,29 @@ function drawCurrentLocation() {
           },
           min: xMin,
           max: xMax,
-          grid: {
-            color: 'rgba(0,0,0,0.1)'
-          }
+          grid: { color: 'rgba(0,0,0,0.1)' }
         },
         y: {
-          title: {
-            display: true,
-            text: '潮高 (m)'
-          },
-          ticks: {
-            callback: v => v.toFixed(2)
-          },
+          title: { display: true, text: '潮高 (m)' },
+          ticks: { callback: v => Number(v).toFixed(2) },
           suggestedMin: -2.5,
           suggestedMax: 2.0,
           grid: {
-            color: ctx => {
-              if (ctx.tick.value === 0) return 'rgba(0,0,0,0.5)'; // 0m 軸深色
-              return 'rgba(0,0,0,0.08)';
-            },
-            lineWidth: ctx => (ctx.tick.value === 0 ? 1.5 : 0.5)
+            color: g => (g.tick.value === 0 ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.08)'),
+            lineWidth: g => (g.tick.value === 0 ? 1.5 : 0.5)
           }
         }
       },
       plugins: {
         legend: { display: false },
-        nowLine: {
-          xPosition: null
-        },
-        tideLabel: {
-          labels: tideLabels
-        },
+        nowLine: { xPosition: null },
+        tideLabel: { labels: tideLabels },
         tooltip: {
           callbacks: {
-            label: ctx => {
-              const d = new Date(ctx.parsed.x);
-              const tStr = `${formatDateOnly(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-              return `${tStr}： ${ctx.parsed.y.toFixed(2)} m`;
+            label: c => {
+              const d = new Date(c.parsed.x);
+              const tStr = `${formatDateOnly(d)}(${weekZh(d)}) ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+              return `${tStr}： ${c.parsed.y.toFixed(2)} m`;
             }
           }
         }
@@ -403,7 +407,7 @@ function drawCurrentLocation() {
   updateNowLine(true);
 }
 
-// ====== 更新現在時間線（以毫秒為單位） ======
+// ====== 更新現在時間線（毫秒） ======
 function updateNowLine(updateText = false) {
   if (!tideChart) return;
 
@@ -420,7 +424,7 @@ function updateNowLine(updateText = false) {
   }
 }
 
-// ====== 事件綁定 ======
+// ====== 事件 ======
 stationSelect.addEventListener('change', () => {
   currentLocationId = stationSelect.value;
   drawCurrentLocation();
@@ -430,7 +434,6 @@ refreshBtn.addEventListener('click', () => {
   fetchTideData();
 });
 
-// 每分鐘更新一次現在時間線
 setInterval(() => updateNowLine(true), 60 * 1000);
 
 // ====== 初始化 ======
