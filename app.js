@@ -106,9 +106,9 @@ const nowLinePlugin = {
     ctx.beginPath();
     ctx.moveTo(x, top);
     ctx.lineTo(x, bottom);
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 5;
     ctx.strokeStyle = ORANGE_COLOR;
-    ctx.setLineDash([6, 6]);
+    ctx.setLineDash([]);
     ctx.stroke();
     ctx.restore();
   }
@@ -343,7 +343,7 @@ function drawCurrentLocation() {
         data: dataPoints,
         tension: 0.4,
         fill: false,
-        borderWidth: 2,
+        borderWidth: 3.5,
         pointRadius: pointRadius,
         pointBackgroundColor: pointBackgroundColor,
         pointHitRadius: 6,
