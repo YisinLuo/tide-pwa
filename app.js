@@ -4,7 +4,7 @@ const GREEN_COLOR = '#008000';  // 下降波線
 const ORANGE_COLOR = '#ff8800'; // 現在時間線
 
 // ====== API 設定 ======
-const API_URL = "https://tide-proxy-production.up.railway.app/api/tide";
+const API_URL = "https://tide-proxy-299292357130.asia-east1.run.app/api/tide";
 
 // 只顯示這些測站
 const ALLOWED_STATION_KEYWORDS = [
