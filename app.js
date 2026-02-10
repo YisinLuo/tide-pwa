@@ -4,7 +4,7 @@ const GREEN_COLOR = '#008000';  // 下降波線
 const ORANGE_COLOR = '#ff8800'; // 現在時間線
 
 // ====== API 設定 ======
-const API_URL = "https://tide-proxy-299292357130.asia-east1.run.app/api/tide";
+const API_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=AehSKLiT16fDDX_9kpVAngrYCpMhJw0QAOscZML_7ehQoA-cLQ5Xvs_N5PcF_D3UiKBqnwt6GWpxW_8xS3i0KRbZp4oiT60_nHfY6Iud0dWyrhsM9LyJG3fHqXU17ZR_r6qB8ibygKiQGY_YjemaCOXnYKMbBctI3YgICaU7rGKGvygdhHWlwvdbVzzRfL-5XcBaWHImh55YQaYGDL8Gpjjx_IsMBiXLiKhDvfPJ7zSP3XV2f2nGnut4Lq2w0noxKYXP9AQleapkiHMuEzdQRzTQFJAVPIvhKhmYZ1xLK1YJ&lib=MGZJNI65N6FnRpq2KRghdTmcsF-_ojyFC";
 
 // 只顯示這些測站
 const ALLOWED_STATION_KEYWORDS = [
