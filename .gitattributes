@@ -1,0 +1,8 @@
+# GitHub Actions 在 Linux runner 上執行，workflow 內嵌的 shell 腳本
+# 若帶 CRLF 會導致 `set -euo pipefail\r` 之類的語法錯誤，強制使用 LF。
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# 由 workflow 產生的資料檔，標記為 generated 讓 diff 不佔版面
+data/tide.json -diff linguist-generated

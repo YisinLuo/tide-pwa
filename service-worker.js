@@ -1,10 +1,11 @@
-// 版本號改成 v14，強迫啟用新 cache
-const CACHE_NAME = 'tide-pwa-v14';
+// 版本號改成 v15，強迫啟用新 cache
+const CACHE_NAME = 'tide-pwa-v15';
 const STATIC_ASSETS = [
   './',
   './index.html',
   './app.js',
   './manifest.json',
+  './data/tide.json',
   './icon-192.png',
   './icon-512.png'
 ];
@@ -16,7 +17,8 @@ const isNavigationRequest = request => {
 const isCoreAsset = url => {
   return url.pathname === '/' ||
     url.pathname.endsWith('/index.html') ||
-    url.pathname.endsWith('/app.js');
+    url.pathname.endsWith('/app.js') ||
+    url.pathname.endsWith('/data/tide.json');
 };
 
 self.addEventListener('install', event => {

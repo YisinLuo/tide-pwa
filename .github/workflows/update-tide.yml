@@ -1,0 +1,72 @@
+name: Update tide data
+
+on:
+  schedule:
+    - cron: '0 21 * * *'   # 每日 21:00 UTC = 台灣時間 05:00
+  workflow_dispatch:        # 允許手動觸發（首次執行與除錯必備）
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch tide data for the 21 stations
+        env:
+          CWA_API_KEY: ${{ secrets.CWA_API_KEY }}
+        run: |
+          set -euo pipefail
+          STATIONS="基隆市中正區,新北市貢寮區,新北市金山區,新北市淡水區,桃園市新屋區,新竹縣竹北市,苗栗縣苑裡鎮,臺中市清水區,彰化縣鹿港鎮,雲林縣四湖鄉,嘉義縣東石鄉,臺南市七股區,臺南市安平區,高雄市林園區,屏東縣東港鎮,屏東縣枋山鄉,屏東縣恆春鎮,臺東縣大武鄉,臺東縣卑南鄉,花蓮縣吉安鄉,宜蘭縣頭城鎮"
+          curl -fsS -G \
+            --data-urlencode "Authorization=$CWA_API_KEY" \
+            --data-urlencode "LocationName=$STATIONS" \
+            "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-A0021-001" \
+            -o raw.json
+
+      - name: Validate before writing
+        run: |
+          set -euo pipefail
+          test "$(jq -r '.success' raw.json)" = "true"
+          COUNT=$(jq '.records.TideForecasts | length' raw.json)
+          echo "stations returned: $COUNT"
+          test "$COUNT" -eq 21
+
+      - name: Slim to only the fields app.js uses
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          # 先寫暫存檔，確認產出正常才覆蓋，避免 jq 出錯時留下半截檔案
+          jq -c '{records: {TideForecasts: [.records.TideForecasts[] | {
+            Location: {
+              LocationId: .Location.LocationId,
+              LocationName: .Location.LocationName,
+              TimePeriods: {Daily: [.Location.TimePeriods.Daily[] | {
+                Date, TideRange,
+                Time: [.Time[] | {DateTime, Tide,
+                  TideHeights: {AboveLocalMSL: .TideHeights.AboveLocalMSL}}]
+              }]}
+            }}]}}' raw.json > tide.tmp.json
+
+          # 產出必須自身可解析、站數正確、且每站都有潮汐事件
+          test "$(jq '.records.TideForecasts | length' tide.tmp.json)" -eq 21
+          test "$(jq '[.records.TideForecasts[] | .Location.TimePeriods.Daily[].Time[]] | length' tide.tmp.json)" -gt 0
+          test "$(jq '[.records.TideForecasts[] | select((.Location.TimePeriods.Daily | length) == 0)] | length' tide.tmp.json)" -eq 0
+
+          mv tide.tmp.json data/tide.json
+          rm raw.json
+
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/tide.json
+          if git diff --cached --quiet; then
+            echo "no change"
+            exit 0
+          fi
+          git commit -m "Update tide data"
+          git push

@@ -23,32 +23,63 @@ tide-pwa/
 ├── service-worker.js  # 快取策略
 ├── icon-192.png       # PWA 圖示
 ├── icon-512.png
+├── data/
+│   └── tide.json      # 潮汐資料，由 GitHub Actions 每日產生
+├── .github/workflows/
+│   └── update-tide.yml
 └── gas/
-    └── Code.gs        # GAS proxy 程式碼備份（非執行版本）
+    └── Code.gs        # 舊版 GAS proxy（已停用，保留作備援）
 ```
 
 無建置流程、無 npm 依賴。Chart.js 由 CDN 載入（jsDelivr）。
 
 ## 資料來源與架構
 
+資料在**建置期**取得，執行期只讀靜態檔：
+
 ```
-瀏覽器 (GitHub Pages)  →  Google Apps Script (GAS)  →  中央氣象署開放資料 API
-                            ↑ 存放 API 金鑰、處理 CORS
+GitHub Actions（每日 cron）
+   └→ 中央氣象署 API（只要 21 站，jq 瘦身）
+       └→ commit data/tide.json
+           └→ Pages CDN → 瀏覽器
 ```
 
-前端**不持有任何 API 金鑰**。GAS 部署為 Web App，作為 proxy 代為呼叫氣象署 API 並回傳 JSON，同時解決瀏覽器直連的 CORS 限制。
+前端**不持有任何 API 金鑰** — 金鑰存放於 GitHub Secrets，只在 Actions runner 內使用。使用的資料集為氣象署 **F-A0021-001**（潮汐預報）。
 
-使用的資料集為氣象署 **F-A0021-001**（潮汐預報）。
-
-API 端點寫在 `app.js:7`：
+資料來源寫在 `app.js:8`：
 
 ```js
-const API_URL = "https://script.google.com/macros/s/AKfycb.../exec";
+const API_URL = "./data/tide.json";
 ```
 
-### GAS Proxy 設定
+### 為什麼不即時呼叫 API
 
-GAS 專案獨立於此 repo，程式碼備份於 [`gas/Code.gs`](gas/Code.gs)（**備份用，不會被執行** — 修改後需回到 script.google.com 貼上並重新部署）：
+實測三種做法的差距很大：
+
+| 做法 | 延遲 | 傳輸量 |
+|------|------|--------|
+| GAS 轉發全部 266 站（舊版） | 23,000 ms | 4.8 MB |
+| 氣象署 API 直連，全部 266 站 | 3,700 ms | 4.8 MB |
+| 氣象署 API 直連，只取 21 站 | 593 ms | 387 KB |
+| **靜態檔（現行）** | **~120 ms** | 269 KB |
+
+兩個瓶頸疊加：舊版抓了 266 站卻只用 21 站（浪費 92% 傳輸量），且 GAS 轉發 4.8 MB 就要吃掉約 19 秒。潮汐是 32 天滾動預報、一天最多更新一次，預先產生成靜態檔最划算。
+
+### 資料更新機制
+
+`.github/workflows/update-tide.yml` 每日 21:00 UTC（台灣 05:00）執行，也可從 **Actions → Update tide data → Run workflow** 手動觸發。
+
+流程為：呼叫氣象署 API（帶 `LocationName` 只取 21 站）→ **驗證** `success` 為 true 且站數為 21 → 用 `jq` 只保留 `app.js` 會用到的欄位（省 30%）→ 內容有變才 commit。
+
+> 驗證步驟不可省略。若氣象署回傳錯誤或空資料，工作流程會中斷而非把壞檔案 commit 上去，`data/tide.json` 保留前一版可用資料。
+
+設定 Secret：Repo **Settings → Secrets and variables → Actions → New repository secret**，名稱 `CWA_API_KEY`，值為[氣象署開放資料平臺](https://opendata.cwa.gov.tw/)申請的授權碼（格式 `CWA-XXXXXXXX-...`）。
+
+> ⚠️ GitHub 規定 repo 連續 60 天無活動時會自動停用排程工作流程（bot commit 不一定計入）。若長期未手動推送，需留意 Actions 是否仍在執行。
+
+### 舊版 GAS Proxy（已停用）
+
+前一版透過 Google Apps Script 代為呼叫氣象署 API。**目前已不再使用**，但 GAS 部署可保留不刪，作為 Actions 故障時的手動備援。程式碼備份於 [`gas/Code.gs`](gas/Code.gs)：
 
 ```js
 function doGet(e) {
@@ -78,22 +109,11 @@ function doGet(e) {
 }
 ```
 
-建置步驟：
+若要重新啟用作為備援：於 [script.google.com](https://script.google.com) 建立專案貼上程式碼 → **專案設定 → 指令碼屬性**新增 `CWA_API_KEY` → **部署為網頁應用程式**（執行身分：我；誰可以存取：**所有人**）→ 把產生的 `/exec` 網址填回 `app.js` 的 `API_URL`。
 
-1. 於 [script.google.com](https://script.google.com) 建立新專案，貼上上述程式碼
-2. **專案設定 → 指令碼屬性 → 新增屬性**
-   - 屬性名稱：`CWA_API_KEY`
-   - 值：你的氣象署會員授權碼（格式 `CWA-XXXXXXXX-...`，於 [氣象署開放資料平臺](https://opendata.cwa.gov.tw/) 申請）
-3. **部署 → 新增部署作業 → 類型選「網頁應用程式」**
-   - 執行身分：我
-   - 誰可以存取：**所有人**（前端為匿名呼叫，必須設為所有人）
-4. 複製產生的 `/exec` 網址，填入 `app.js` 的 `API_URL`
+### 資料格式
 
-> 🔑 金鑰只存在 GAS 指令碼屬性中，不寫入程式碼、不進版控。若金鑰外洩，至氣象署平臺重新產生後更新指令碼屬性即可，前端無需改動。
-
-### 回應格式
-
-GAS 需回傳氣象署原始結構，`app.js` 依此路徑解析：
+`data/tide.json` 維持氣象署原始結構，`app.js` 依此路徑解析：
 
 ```
 records.TideForecasts[]
@@ -108,15 +128,9 @@ records.TideForecasts[]
                  └── TideHeights.AboveLocalMSL   單位 cm
 ```
 
-潮高取用優先序為 `AboveLocalMSL` → `AboveTWD` → `AboveTWVD` → `AboveTWDV` → `AboveChartDatum`，顯示時除以 100 換算為公尺。
+潮高單位為公分，顯示時除以 100 換算為公尺。`app.js` 保留 `AboveLocalMSL` → `AboveTWD` → `AboveTWVD` → `AboveTWDV` → `AboveChartDatum` 的取用優先序，但工作流程已在瘦身時只保留 `AboveLocalMSL`，實際只會走第一順位。
 
-### 更新 GAS 端點
-
-GAS 每次「部署新版本」都會產生新的 `/exec` 網址（除非選擇更新現有部署）。網址變更時：
-
-1. 修改 `app.js` 的 `API_URL`
-2. **同時提高 `service-worker.js` 的 `CACHE_NAME` 版本號**（見下方注意事項）
-3. commit 並 push
+「資料更新時間」取自 `data/tide.json` 回應的 `Last-Modified` 標頭，代表**資料產生時間**而非抓取時間。
 
 ## 部署（GitHub Pages）
 
@@ -144,9 +158,11 @@ const CACHE_NAME = 'tide-pwa-vNN';   // ← 每次改 app.js / index.html 都要
 
 | 資源 | 策略 | 說明 |
 |------|------|------|
-| `index.html`、`app.js`、頁面導航 | network-first | 優先取得最新程式碼，失敗才回退快取 |
+| `index.html`、`app.js`、`data/tide.json`、頁面導航 | network-first | 優先取得最新程式碼與資料，失敗才回退快取 |
 | 其餘同源靜態資源（圖示、manifest） | cache-first | 圖示等不常變動 |
-| 外部 API（GAS） | network-first | 離線時回退至上次成功的回應 |
+| 外部資源 | network-first | 離線時回退至上次成功的回應 |
+
+> `data/tide.json` 必須留在 network-first 名單（`service-worker.js` 的 `isCoreAsset`）。它是同源資源，一旦落入 cache-first 分支，裝置會永遠讀到舊資料直到版本號變更。
 
 ## 本機開發
 
@@ -166,10 +182,10 @@ npx serve
 
 | 需求 | 位置 |
 |------|------|
-| 增減顯示的測站 | `app.js:10` `ALLOWED_STATION_KEYWORDS`（陣列順序即選單順序） |
+| 增減顯示的測站 | `app.js:11` `ALLOWED_STATION_KEYWORDS`（陣列順序即選單順序）**＋ workflow 的 `STATIONS` 與站數驗證** |
 | 波線／時間線顏色 | `app.js:2-4` |
-| 一天顯示的寬度 | `app.js:282` `widthPerDay` |
-| Y 軸預設範圍 | `app.js:382-383` `suggestedMin` / `suggestedMax` |
+| 一天顯示的寬度 | `app.js:286` `widthPerDay` |
+| Y 軸預設範圍 | `app.js:386-387` `suggestedMin` / `suggestedMax` |
 | 字級（為戶外閱讀放大） | `index.html` `<style>` 區塊 |
 
 除錯時建議在 DevTools → Application → Service Workers 勾選 **Update on reload**，避免被快取誤導。
@@ -178,18 +194,21 @@ npx serve
 
 **畫面顯示「潮汐資料更新失敗，請稍後再試」**
 
-GAS 使用 `muteHttpExceptions: true`，氣象署回傳的錯誤（金鑰失效、超出流量、資料集維護中）會以 HTTP 200 原樣轉傳，前端解析不到 `records.TideForecasts` 就丟出「TideForecasts 為空」。**直接在瀏覽器開啟 `API_URL`** 即可看到真正的錯誤訊息：
+先在瀏覽器直接開啟 `https://<你的網址>/data/tide.json` 確認檔案本身正常：
 
-| 實際回應 | 原因 |
-|----------|------|
-| `{"success":"false"}` 或授權錯誤訊息 | 指令碼屬性 `CWA_API_KEY` 未設定或已失效 |
-| `{"error":"..."}` | GAS 端 `UrlFetchApp` 拋錯（多為網路或配額問題） |
-| Google 登入頁面 | 部署權限不是「所有人」 |
-| 正常 JSON 但 `TideForecasts` 為空 | 氣象署資料集暫時無資料 |
+| 狀況 | 原因 |
+|------|------|
+| 404 | `data/tide.json` 不存在 — Actions 從未成功執行過 |
+| 檔案存在但日期是舊的 | 排程被停用或連續失敗，見 Actions 頁面的執行紀錄 |
+| 檔案正常但畫面仍失敗 | 多為 service worker 快取問題，見下一則 |
 
-**改了程式碼但手機上沒更新** — `CACHE_NAME` 忘了加版號。改完 push，再從裝置移除 PWA 重新加入主畫面。
+Actions 若失敗，到 **Actions → Update tide data** 看是哪一步中斷。停在驗證步驟通常代表 `CWA_API_KEY` 未設定或已失效。
 
-**測站選單是空的** — 氣象署的 `LocationName` 用字若有異動（例如「台」與「臺」），`ALLOWED_STATION_KEYWORDS` 的 `includes` 比對會失敗。可先在 Console 印出 `data.records.TideForecasts.map(f => f.Location.LocationName)` 核對。
+**資料很舊 / 改了程式碼但手機上沒更新** — `CACHE_NAME` 忘了加版號，或 `data/tide.json` 被移出 network-first 名單。改完 push，再從裝置移除 PWA 重新加入主畫面。
+
+**測站選單少了幾站** — 氣象署的 `LocationName` 用字若有異動（例如「台」與「臺」、「市」與「縣」），`ALLOWED_STATION_KEYWORDS` 的 `includes` 比對會**靜默失敗**，該站直接從選單消失而不會報錯。曾經發生過：`花蓮市吉安鄉` 實際應為 `花蓮縣吉安鄉`。
+
+注意 `app.js` 與 `.github/workflows/update-tide.yml` **各有一份測站清單**，增減測站時兩邊都要改，否則 workflow 的站數驗證（`test "$COUNT" -eq 21`）會失敗。
 
 ## 授權
 

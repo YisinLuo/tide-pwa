@@ -4,7 +4,8 @@ const GREEN_COLOR = '#008000';  // 下降波線
 const ORANGE_COLOR = '#ff8800'; // 現在時間線
 
 // ====== API 設定 ======
-const API_URL = "https://script.google.com/macros/s/AKfycbx08GHLitNu0n-okxNCG7tnCFPMjbM3DmuXDcpQlzVdz8ayHgcyygYF7iu5jwj_N8AZAQ/exec";
+// 由 .github/workflows/update-tide.yml 每日產生，只含下方 21 個測站
+const API_URL = "./data/tide.json";
 
 // 只顯示這些測站
 const ALLOWED_STATION_KEYWORDS = [
@@ -195,8 +196,12 @@ function collectTideEventsFromDaily(forecastObj) {
 async function fetchTideData() {
   statusDiv.textContent = "正在更新潮汐資料...";
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { cache: 'no-cache' });
     const data = await res.json();
+
+    // 靜態檔的 Last-Modified 才是資料產生時間；抓取時間沒有參考價值
+    const lastModified = res.headers.get('Last-Modified');
+    lastUpdateTime = lastModified ? new Date(lastModified) : new Date();
 
     const forecasts = data?.records?.TideForecasts || [];
     if (!forecasts.length) throw new Error("TideForecasts 為空");
@@ -226,7 +231,6 @@ async function fetchTideData() {
 
     updateStationSelect();
 
-    lastUpdateTime = new Date();
     statusDiv.textContent = `資料更新時間：${formatDateTime(lastUpdateTime)}`;
 
     drawCurrentLocation();
