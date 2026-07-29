@@ -135,7 +135,7 @@ Pages 設定位於 repo 的 **Settings → Pages**，來源為 `main` 分支根�
 `service-worker.js:2` 的 `CACHE_NAME` 是使用者能否拿到新版的關鍵：
 
 ```js
-const CACHE_NAME = 'tide-pwa-v13';   // ← 每次改 app.js / index.html 都要 +1
+const CACHE_NAME = 'tide-pwa-vNN';   // ← 每次改 app.js / index.html 都要 +1
 ```
 
 版本號變更會觸發 `activate` 事件清除所有舊快取。若忘記更新，已安裝 PWA 的裝置可能持續使用舊資源。

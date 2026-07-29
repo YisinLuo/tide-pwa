@@ -1,5 +1,5 @@
-// 版本號改成 v13，強迫啟用新 cache
-const CACHE_NAME = 'tide-pwa-v13';
+// 版本號改成 v14，強迫啟用新 cache
+const CACHE_NAME = 'tide-pwa-v14';
 const STATIC_ASSETS = [
   './',
   './index.html',
